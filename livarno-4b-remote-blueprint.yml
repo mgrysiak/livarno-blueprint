@@ -1,0 +1,177 @@
+blueprint:
+  name: Z2M - (Lidl) Silvercrest Livarno Lux switch and dimming light remote control
+  description: |
+    Control lights with the Silvercrest Livarno remote sold by Lidl connected through zigbee2mqtt. Model number FB20-002/HG06323
+
+    The on/off buttons work as expected to change the configured light entities. You can additonally specify the brightness to use when turning on.
+
+    Brightness up/down will work with single click, or smoothly dim them if held down.
+
+    Alternatively, different actions can be specified on long press of the brightness buttons.
+
+    This blueprint is based on the great work by starbuck93 here: https://community.home-assistant.io/t/zigbee2mqtt-ikea-five-button-remote/255308
+
+  domain: automation
+  input:
+    remote:
+      name: Remote
+      description: Remote to use
+      selector:
+        entity:
+          integration: mqtt
+          domain: sensor
+
+    light:
+      name: Light(s)
+      description: The light(s) to control
+      selector:
+        target:
+          entity:
+            domain: light
+    force_brightness:
+      name: Force turn on brightness
+      description: >
+        Force the brightness to the set level below, when the "on" button on
+        the remote is pushed and lights turn on.
+      default: false
+      selector:
+        boolean:
+    brightness:
+      name: Brightness
+      description: Brightness of the light(s) when turning on
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 100
+          mode: slider
+          step: 1
+          unit_of_measurement: "%"
+    alt_brightness_up_hold:
+      name: Run action on brightness up hold
+      description: >
+        Configure a different action to run when holding brightness up instead of increasing light brightness.
+      default: false
+      selector:
+        boolean:
+    button_brightness_up_hold:
+      name: Brightness up hold
+      description: Action to run on brightness up hold
+      default: []
+      selector:
+        action:
+    alt_brightness_down_hold:
+      name: Run action on brightness down hold
+      description: >
+        Configure a different action to run when holding brightness down instead of decreasing light brightness.
+      default: false
+      selector:
+        boolean:
+    button_brightness_down_hold:
+      name: Brightness down hold
+      description: Action to run on brightness down hold
+      default: []
+      selector:
+        action:
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  force_brightness: !input force_brightness
+  alt_brightness_up_hold: !input alt_brightness_up_hold
+  alt_brightness_down_hold: !input alt_brightness_down_hold
+
+trigger:
+  - platform: state
+    entity_id: !input remote
+    attribute: action
+
+action:
+  - variables:
+      command: "{{ trigger.to_state.state }}"
+  - choose:
+      - conditions:
+          - "{{ command == 'on' }}"
+        sequence:
+          - choose:
+              - conditions: "{{ force_brightness }}"
+                sequence:
+                  - service: light.turn_on
+                    target: !input light
+                    data:
+                      transition: 1
+                      brightness_pct: !input brightness
+            default:
+              - service: light.turn_on
+                target: !input light
+                data:
+                  transition: 1
+
+      - conditions:
+          - "{{ command == 'off' }}"
+        sequence:
+          - service: light.turn_off
+            target: !input light
+            data:
+              transition: 1
+
+      - conditions:
+          - "{{ command == 'brightness_step_up' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input light
+            data:
+              brightness_step_pct: 10
+              transition: 1
+
+      - conditions:
+          - "{{ command == 'brightness_move_up' }}"
+        sequence:
+          - choose:
+              - conditions: "{{ alt_brightness_up_hold }}"
+                sequence: !input button_brightness_up_hold
+            default:
+              - repeat:
+                  until:
+                    - condition: state
+                      entity_id: !input remote
+                      state: brightness_stop
+                      attribute: action
+                  sequence:
+                    - service: light.turn_on
+                      data:
+                        brightness_step_pct: 10
+                        transition: 1
+                      target: !input light
+                    - delay: "1"
+
+      - conditions:
+          - "{{ command == 'brightness_step_down' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input light
+            data:
+              brightness_step_pct: -10
+              transition: 1
+
+      - conditions:
+          - "{{ command == 'brightness_move_down' }}"
+        sequence:
+          - choose:
+              - conditions: "{{ alt_brightness_down_hold }}"
+                sequence: !input button_brightness_down_hold
+            default:
+              - repeat:
+                  until:
+                    - condition: state
+                      entity_id: !input remote
+                      state: brightness_stop
+                      attribute: action
+                  sequence:
+                    - service: light.turn_on
+                      data:
+                        brightness_step_pct: -10
+                        transition: 1
+                      target: !input light
+                    - delay: "1"
